@@ -1,0 +1,22 @@
+[project]
+name = "querymind"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.136.1",
+    "google-adk>=1.32.0",
+    "langchain>=1.2.17",
+    "langchain-community>=0.4.1",
+    "langchain-google-genai>=4.2.2",
+    "langgraph>=1.1.10",
+    "langsmith>=0.8.0",
+    "opentelemetry-sdk>=1.41.1",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "python-dotenv>=1.2.2",
+    "streamlit>=1.57.0",
+    "tavily-python>=0.7.24",
+    "uvicorn>=0.46.0",
+]
