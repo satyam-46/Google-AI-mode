@@ -1,116 +1,90 @@
-"""Async web search tool stub with Pydantic results and retry/concurrency guards.
+"""LangChain-compatible async web search tool."""
 
-Real implementation should use the Tavily async client. This stub is defensive:
-- If `tavily` is unavailable it returns an empty list.
-- Uses an asyncio.Semaphore to limit concurrent external calls.
-- Uses tenacity AsyncRetrying for exponential backoff when available.
-"""
-from typing import List, Optional
-import os
+from __future__ import annotations
+
 import asyncio
 import logging
+import os
+from typing import Any
 
-from pydantic import BaseModel
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
+from tavily import AsyncTavilyClient
+from tavily.errors import MissingAPIKeyError, UsageLimitExceededError
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-try:
-    import tavily  # type: ignore
-except Exception:
-    tavily = None
-
-try:
-    from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, retry_if_exception_type
-except Exception:
-    AsyncRetrying = None  # type: ignore
-
+_LOG = logging.getLogger(__name__)
 _CONCURRENCY = int(os.getenv("TAVILY_CONCURRENCY", "5"))
 _semaphore = asyncio.Semaphore(_CONCURRENCY)
-_LOG = logging.getLogger(__name__)
 
 
 class SearchResult(BaseModel):
+    """Normalized web search result returned by QueryMind."""
+
     url: str
     title: str
     content: str
     relevance_score: float = 0.0
 
 
-async def _fetch_from_tavily(query: str, top_k: int = 5) -> List[SearchResult]:
-    if tavily is None:
-        raise RuntimeError("tavily client not installed")
-
-    # This code attempts to call a hypothetical async Tavily client.
-    # Replace with the real Tavily async API when available.
-    client = None
-    try:
-        client = tavily.AsyncClient(api_key=os.getenv("TAVILY_API_KEY"))
-    except Exception:
-        # If the exact client class differs, attempt a generic constructor
-        try:
-            client = tavily.Client(api_key=os.getenv("TAVILY_API_KEY"))
-        except Exception:
-            raise
-
-    # Best-effort mapping — real response shape depends on the Tavily SDK.
-    resp = await client.search(query, limit=top_k)
-    results: List[SearchResult] = []
-    try:
-        items = getattr(resp, "results", resp)
-        for it in items:
-            url = getattr(it, "url", getattr(it, "link", ""))
-            title = getattr(it, "title", "")
-            content = getattr(it, "snippet", getattr(it, "content", ""))
-            score = float(getattr(it, "score", 0.0) or 0.0)
-            results.append(SearchResult(url=url, title=title, content=content, relevance_score=score))
-    except Exception:
-        _LOG.exception("Failed to parse tavily response; returning empty list")
-
-    return results
+class WebSearchInput(BaseModel):
+    query: str = Field(..., description="Search query to send to Tavily.")
+    top_k: int = Field(5, ge=1, le=10, description="Maximum number of results to return.")
 
 
-async def web_search(query: str, top_k: int = 5) -> List[SearchResult]:
-    """Public async web search function.
+def _normalize_result(item: dict[str, Any]) -> SearchResult:
+    return SearchResult(
+        url=str(item.get("url") or ""),
+        title=str(item.get("title") or ""),
+        content=str(item.get("content") or item.get("snippet") or ""),
+        relevance_score=float(item.get("score") or item.get("relevance_score") or 0.0),
+    )
 
-    - Retries with exponential backoff (tenacity) when available.
-    - Concurrency-limited by a semaphore.
-    - Returns an empty list when the Tavily client is not installed.
+
+async def web_search(query: str, top_k: int = 5) -> list[SearchResult]:
+    """Search the web with Tavily and return normalized results.
+
+    If `TAVILY_API_KEY` is not configured, this returns an empty list so the
+    rest of the LangChain pipeline remains runnable during local learning.
     """
-    async with _semaphore:
-        if tavily is None or AsyncRetrying is None:
-            # Defensive: no external client available in this environment.
-            _LOG.debug("Tavily or tenacity not available; returning empty results")
-            await asyncio.sleep(0)
-            return []
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        _LOG.info("TAVILY_API_KEY is not set; returning empty web results")
+        return []
 
+    async with _semaphore:
         retryer = AsyncRetrying(
             stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type(Exception),
+            wait=wait_exponential(multiplier=1, min=1, max=8),
+            retry=retry_if_exception_type((TimeoutError, UsageLimitExceededError)),
             reraise=True,
         )
 
         async for attempt in retryer:
             with attempt:
-                return await _fetch_from_tavily(query, top_k=top_k)
+                client = AsyncTavilyClient(api_key=api_key)
+                response = await client.search(
+                    query=query,
+                    max_results=top_k,
+                    search_depth="basic",
+                    include_raw_content=False,
+                )
+                return [_normalize_result(item) for item in response.get("results", [])]
 
-
-__all__ = ["SearchResult", "web_search"]
-from typing import List
-import asyncio
-from pydantic import BaseModel
-
-
-class SearchResult(BaseModel):
-    url: str
-    title: str
-    content: str
-    relevance_score: float = 0.0
-
-
-async def web_search(query: str, top_k: int = 5) -> List[SearchResult]:
-    """Stub async web_search that returns no results.
-
-    Real implementation should call Tavily (async), apply rate-limiting,
-    backoff and return typed `SearchResult` items.
-    """
-    await asyncio.sleep(0)  # keep function async-friendly
     return []
+
+
+async def _web_search_tool(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+    results = await web_search(query=query, top_k=top_k)
+    return [result.model_dump() for result in results]
+
+
+web_search_tool = StructuredTool.from_function(
+    coroutine=_web_search_tool,
+    name="web_search",
+    description="Search the web for current evidence and return normalized results.",
+    args_schema=WebSearchInput,
+)
+
+
+__all__ = ["SearchResult", "WebSearchInput", "web_search", "web_search_tool"]

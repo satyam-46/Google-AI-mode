@@ -1,6 +1,3 @@
-"""Chains module aimed at hosting LCEL/Chain classes and runners."""
+"""LCEL chains, prompts, and parsers."""
 
-__all__ = ["planner_chain", "retriever_chain", "synthesizer_chain"]
-"""LCEL chains and prompt templates."""
-
-__all__ = []
+__all__ = ["base_chains", "parsers", "prompts"]

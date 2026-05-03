@@ -1,20 +1,26 @@
+"""Checkpointer factory placeholder for the LangGraph phase."""
+
+from __future__ import annotations
+
 from typing import Any
 
 
 def get_checkpointer(env: str = "dev") -> Any:
-    """Return a checkpointer object for the given environment.
+    """Return an in-memory checkpointer until the LangGraph phase starts."""
+    try:
+        from langgraph.checkpoint.memory import InMemorySaver
 
-    This is a stub. Replace with LangGraph SqliteSaver/Sqlalchemy-backed implementation.
-    """
-        # For dev we'll return a lightweight in-memory placeholder
-        class _InMemorySaver:
-            def __init__(self):
-                self._data = {}
-
-            def save(self, key, value):
-                self._data[key] = value
-
-            def load(self, key, default=None):
-                return self._data.get(key, default)
-
+        return InMemorySaver()
+    except Exception:
         return _InMemorySaver()
+
+
+class _InMemorySaver:
+    def __init__(self) -> None:
+        self._data: dict[str, Any] = {}
+
+    def save(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+    def load(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
