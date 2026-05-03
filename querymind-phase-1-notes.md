@@ -187,6 +187,112 @@ Expected result:
 9 passed
 ```
 
+## Current Live Latency Observations
+
+When real API keys are configured, QueryMind stops using the local fake fallback path and starts calling real external services.
+
+That means live responses can be much slower than unit tests.
+
+One observed query:
+
+```text
+where is england located and how to address the accent gaps? where is the best english learning classes found?
+```
+
+produced this timing:
+
+```text
+total_latency_ms: 85384
+```
+
+So the full response took about **85 seconds**.
+
+The trace showed:
+
+```text
+planner:      ~38.3s
+synthesizer:  ~40.6s
+```
+
+This means most of the time was spent in real Gemini model calls, not FastAPI.
+
+## Why It Takes Time Right Now
+
+The current live pipeline is:
+
+```text
+1 planner LLM call
+3 Tavily/search calls
+3 retriever LLM calls
+1 synthesizer LLM call
+```
+
+The exact number depends on how many sub-questions the planner creates.
+
+For a compound query, the planner may split the original question into several sub-questions. In the observed example, it created:
+
+- England location
+- Accent gap strategies
+- Best English learning classes
+
+That is good behavior from a search quality perspective, but it increases latency.
+
+The main reasons for current slowness are:
+
+- Real Gemini calls are slower than the local fake fallback.
+- Planner and synthesizer currently use Pro-class models.
+- Swagger waits for the full JSON response before showing anything.
+- The current phase prioritizes correctness, structure, and grounded retrieval over latency.
+- The system has not yet added caching, timeouts, progressive streaming, or smarter model routing.
+
+## Will LangGraph Make This Faster?
+
+LangGraph will not magically make an individual LLM call faster.
+
+What LangGraph improves is **orchestration**:
+
+- Cleaner parallel fan-out and fan-in
+- Better state tracking
+- Conditional routing
+- Timeouts and fallback paths
+- Checkpointing and resume
+- Streaming intermediate progress
+- Skipping unnecessary nodes
+- Cleaner observability for each agent/node
+
+So LangGraph mainly improves:
+
+- perceived responsiveness
+- reliability
+- debuggability
+- control over multi-step execution
+
+Actual latency improvements will come from:
+
+- using faster models for simpler steps
+- caching search and retrieval results
+- avoiding unnecessary LLM calls
+- streaming partial results
+- setting model timeouts
+- falling back from Pro to Flash when needed
+
+## Near-Term Performance Improvements
+
+Likely optimizations for later:
+
+1. Use `gemini-2.5-flash` for planner.
+2. Use `gemini-2.5-flash` for the first synthesizer pass.
+3. Reserve Pro models for complex, ambiguous, or high-stakes questions.
+4. Skip retriever LLM summarization for simple searches and pass raw snippets directly to synthesis.
+5. Cache repeated sub-query search results.
+6. Add timeouts around external API calls.
+7. Make `/query/stream` the main user experience instead of relying on Swagger JSON responses.
+8. Use LangGraph to stream progress events such as planning, searching, retrieving, and synthesizing.
+
+Interview defense:
+
+> The current latency is expected because one user query expands into multiple LLM and search calls. In this phase, I prioritized correctness, structure, typed outputs, and grounded retrieval over latency. The trace shows most time is spent in planner and synthesizer Gemini Pro calls. In the next phase, LangGraph will improve orchestration through parallel fan-out, checkpointing, conditional routing, and streaming progress. Separately, actual latency can be reduced by using Flash for planner and synthesis, caching sub-query results, and adding timeouts and fallbacks.
+
 ## What Is Not Built Yet
 
 These are intentionally left for later phases:
@@ -250,4 +356,3 @@ Because tests should not depend on API keys, network availability, or model rand
 ## One-Line Resume Defense
 
 > QueryMind is a layered multi-agent search system. I first built the LangChain foundation: typed tools, structured parsers, LCEL chains, and async retrieval. This gives every future LangGraph node a stable contract, making the later fan-out, synthesis, and arbitration orchestration much easier to reason about and test.
-
