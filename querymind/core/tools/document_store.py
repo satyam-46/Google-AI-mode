@@ -11,9 +11,12 @@ from collections import Counter
 from typing import Iterable
 
 from langchain_core.tools import StructuredTool
+from dotenv import load_dotenv
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
+
+load_dotenv()
 
 try:
     import faiss  # type: ignore

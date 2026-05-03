@@ -12,6 +12,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_google_genai import ChatGoogleGenerativeAI
+from dotenv import load_dotenv
 
 from core.chains.parsers import (
     CitedAnswer,
@@ -25,6 +26,8 @@ from core.chains.parsers import (
 )
 from core.chains.prompts import CRITIC_PROMPT, PLANNER_PROMPT, RETRIEVER_PROMPT, SYNTHESIZER_PROMPT
 from core.tools.web_search import SearchResult, web_search
+
+load_dotenv()
 
 
 def _chat_text(value: Any) -> str:
@@ -149,12 +152,13 @@ def _extract_field(text: str, field: str) -> str:
 
 
 def _model(model_name: str, fake_llm: Any) -> Runnable[Any, str]:
-    if not os.getenv("GOOGLE_API_KEY"):
-        return RunnableLambda(fake_llm)
+    fake = RunnableLambda(fake_llm)
+    if os.getenv("QUERYMIND_FORCE_FAKE_LLM") == "true" or not os.getenv("GOOGLE_API_KEY"):
+        return fake
 
     primary = ChatGoogleGenerativeAI(model=model_name, temperature=0)
-    fallback = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
-    return primary.with_fallbacks([fallback])
+    fallback = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    return primary.with_fallbacks([fallback, fake])
 
 
 async def _prepare_retriever_input(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -191,13 +195,13 @@ def _prepare_critic_input(inputs: dict[str, Any] | CitedAnswer) -> dict[str, Any
 
 
 planner_chain: Runnable[dict[str, Any], SubQuestionList] = (
-    PLANNER_PROMPT | _model("gemini-1.5-pro", _fake_planner_llm) | StrOutputParser() | SubQuestionParser
+    PLANNER_PROMPT | _model("gemini-2.5-pro", _fake_planner_llm) | StrOutputParser() | SubQuestionParser
 )
 
 retriever_chain: Runnable[dict[str, Any], RetrievalEvidence] = (
     RunnableLambda(_prepare_retriever_input)
     | RETRIEVER_PROMPT
-    | _model("gemini-1.5-flash", _fake_retriever_llm)
+    | _model("gemini-2.5-flash", _fake_retriever_llm)
     | StrOutputParser()
     | RetrievalEvidenceParser
 )
@@ -205,7 +209,7 @@ retriever_chain: Runnable[dict[str, Any], RetrievalEvidence] = (
 synthesizer_chain: Runnable[dict[str, Any], CitedAnswer] = (
     RunnableLambda(_prepare_synthesizer_input)
     | SYNTHESIZER_PROMPT
-    | _model("gemini-1.5-pro", _fake_synthesizer_llm)
+    | _model("gemini-2.5-pro", _fake_synthesizer_llm)
     | StrOutputParser()
     | CitedAnswerParser
 )
@@ -213,7 +217,7 @@ synthesizer_chain: Runnable[dict[str, Any], CitedAnswer] = (
 critic_chain: Runnable[dict[str, Any] | CitedAnswer, ConfidenceScore] = (
     RunnableLambda(_prepare_critic_input)
     | CRITIC_PROMPT
-    | _model("gemini-1.5-flash", _fake_critic_llm)
+    | _model("gemini-2.5-flash", _fake_critic_llm)
     | StrOutputParser()
     | ConfidenceParser
 )

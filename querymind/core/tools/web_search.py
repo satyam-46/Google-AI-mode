@@ -8,10 +8,13 @@ import os
 from typing import Any
 
 from langchain_core.tools import StructuredTool
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from tavily import AsyncTavilyClient
-from tavily.errors import MissingAPIKeyError, UsageLimitExceededError
+from tavily.errors import UsageLimitExceededError
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+load_dotenv()
 
 _LOG = logging.getLogger(__name__)
 _CONCURRENCY = int(os.getenv("TAVILY_CONCURRENCY", "5"))
