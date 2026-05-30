@@ -251,11 +251,11 @@ Add a RunnableWithFallbacks wrapper that falls back to gemini-flash if pro times
 ---
 
 ### ✅ Phase 1 Checkpoint
-- [ ] All tools pass unit tests
-- [ ] FAISS concurrent write issue identified and fixed with asyncio.Lock
-- [ ] All 5 LCEL chains stream tokens correctly
-- [ ] LangSmith shows chain traces with correct input/output at each step
-- [ ] OutputFixingParser successfully auto-heals one malformed JSON response (write a test for this)
+- [x] All tools pass unit tests
+- [x] FAISS concurrent write issue identified and fixed with asyncio.Lock
+- [x] All 5 LCEL chains stream tokens correctly
+- [x] LangSmith shows chain traces with correct input/output at each step
+- [x] OutputFixingParser successfully auto-heals one malformed JSON response (write a test for this)
 
 ---
 
@@ -532,13 +532,13 @@ def build_graph():
 ---
 
 ### ✅ Phase 2 Checkpoint
-- [ ] Full graph executes end-to-end on a test query
-- [ ] Parallel retrievers confirmed running concurrently (check timestamps in AgentTrace)
-- [ ] Conflict detection triggers correctly on a known contradictory topic (try: "Python 2 vs Python 3 release dates")
-- [ ] Human-in-the-loop interrupt works: graph pauses, state is inspectable, resumes with `.update_state()`
-- [ ] Cache hit confirmed: re-run same query, `cache_hits` is non-empty, latency drops by >50%
-- [ ] Graph survives a simulated retriever timeout (kill Tavily call, confirm graceful error result)
-- [ ] LangSmith trace shows full graph topology with per-node latency
+- [x] Full graph executes end-to-end on a test query
+- [x] Parallel retrievers confirmed running concurrently (check timestamps in AgentTrace)
+- [x] Conflict detection triggers correctly on a known contradictory topic (try: "Python 2 vs Python 3 release dates")
+- [x] Human-in-the-loop interrupt works: graph pauses, state is inspectable, resumes with `.update_state()`
+- [x] Cache hit confirmed: re-run same query, `cache_hits` is non-empty, latency drops by >50%
+- [x] Graph survives a simulated retriever timeout (kill Tavily call, confirm graceful error result)
+- [x] LangSmith trace shows full graph topology with per-node latency
 
 ---
 

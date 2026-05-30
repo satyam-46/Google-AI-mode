@@ -1,3 +1,3 @@
-"""Graph node implementations (stubs)."""
+"""Graph node implementations for Phase 2 LangGraph orchestration."""
 
-__all__ = ["planner", "retriever", "synthesizer", "arbitrator", "critic"]
+__all__ = ["arbitrator", "cache", "critic", "planner", "retriever", "session", "synthesizer"]

@@ -15,16 +15,18 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
 from core.chains.parsers import (
+    ArbitrationResult,
+    FixedArbitrationResultParser,
+    FixedCitedAnswerParser,
+    FixedConfidenceParser,
+    FixedRetrievalEvidenceParser,
+    FixedSubQuestionParser,
     CitedAnswer,
-    CitedAnswerParser,
-    ConfidenceParser,
     ConfidenceScore,
     RetrievalEvidence,
-    RetrievalEvidenceParser,
     SubQuestionList,
-    SubQuestionParser,
 )
-from core.chains.prompts import CRITIC_PROMPT, PLANNER_PROMPT, RETRIEVER_PROMPT, SYNTHESIZER_PROMPT
+from core.chains.prompts import ARBITRATOR_PROMPT, CRITIC_PROMPT, PLANNER_PROMPT, RETRIEVER_PROMPT, SYNTHESIZER_PROMPT
 from core.tools.web_search import SearchResult, web_search
 
 load_dotenv()
@@ -146,9 +148,41 @@ def _fake_critic_llm(prompt: Any) -> str:
     )
 
 
+def _fake_arbitrator_llm(prompt: Any) -> str:
+    text = _chat_text(prompt)
+    conflict = _extract_after("Conflict to resolve:", text)
+    return _json(
+        {
+            "entity": _extract_entity(conflict),
+            "winning_claim": _extract_first_claim(conflict),
+            "winning_source": _extract_first_url(conflict),
+            "reasoning": "Offline arbitrator fallback selected the first sourced claim for deterministic local execution.",
+            "confidence": 0.7,
+        }
+    )
+
+
 def _extract_field(text: str, field: str) -> str:
     match = re.search(rf"^{re.escape(field)}:\s*(.+)$", text, flags=re.IGNORECASE | re.MULTILINE)
     return match.group(1).strip() if match else ""
+
+
+def _extract_entity(text: str) -> str:
+    match = re.search(r"\b[A-Z][a-zA-Z0-9_-]+\b", text)
+    return match.group(0) if match else "unknown"
+
+
+def _extract_first_url(text: str) -> str:
+    match = re.search(r"https?://[^\s,'\")]+", text)
+    return match.group(0) if match else ""
+
+
+def _extract_first_claim(text: str) -> str:
+    for label in ("claim_a", "Claim A", "claim"):
+        claim = _extract_after(f"{label}:", text)
+        if claim and claim != text.strip():
+            return claim.splitlines()[0].strip(" ,")
+    return text.strip()[:500] or "No claim provided."
 
 
 def _model(model_name: str, fake_llm: Any) -> Runnable[Any, str]:
@@ -195,7 +229,7 @@ def _prepare_critic_input(inputs: dict[str, Any] | CitedAnswer) -> dict[str, Any
 
 
 planner_chain: Runnable[dict[str, Any], SubQuestionList] = (
-    PLANNER_PROMPT | _model("gemini-2.5-pro", _fake_planner_llm) | StrOutputParser() | SubQuestionParser
+    PLANNER_PROMPT | _model("gemini-2.5-pro", _fake_planner_llm) | StrOutputParser() | FixedSubQuestionParser
 )
 
 retriever_chain: Runnable[dict[str, Any], RetrievalEvidence] = (
@@ -203,7 +237,7 @@ retriever_chain: Runnable[dict[str, Any], RetrievalEvidence] = (
     | RETRIEVER_PROMPT
     | _model("gemini-2.5-flash", _fake_retriever_llm)
     | StrOutputParser()
-    | RetrievalEvidenceParser
+    | FixedRetrievalEvidenceParser
 )
 
 synthesizer_chain: Runnable[dict[str, Any], CitedAnswer] = (
@@ -211,7 +245,7 @@ synthesizer_chain: Runnable[dict[str, Any], CitedAnswer] = (
     | SYNTHESIZER_PROMPT
     | _model("gemini-2.5-pro", _fake_synthesizer_llm)
     | StrOutputParser()
-    | CitedAnswerParser
+    | FixedCitedAnswerParser
 )
 
 critic_chain: Runnable[dict[str, Any] | CitedAnswer, ConfidenceScore] = (
@@ -219,8 +253,14 @@ critic_chain: Runnable[dict[str, Any] | CitedAnswer, ConfidenceScore] = (
     | CRITIC_PROMPT
     | _model("gemini-2.5-flash", _fake_critic_llm)
     | StrOutputParser()
-    | ConfidenceParser
+    | FixedConfidenceParser
 )
 
+arbitrator_chain: Runnable[dict[str, Any], ArbitrationResult] = (
+    ARBITRATOR_PROMPT
+    | _model("gemini-2.5-pro", _fake_arbitrator_llm)
+    | StrOutputParser()
+    | FixedArbitrationResultParser
+)
 
-__all__ = ["critic_chain", "planner_chain", "retriever_chain", "synthesizer_chain"]
+__all__ = ["arbitrator_chain", "critic_chain", "planner_chain", "retriever_chain", "synthesizer_chain"]

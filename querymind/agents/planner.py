@@ -1,10 +1,19 @@
-from typing import Dict, Any
-import asyncio
+"""Planner agent node."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from core.chains.base_chains import planner_chain
 
 
-async def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Stub planner node: returns a simple sub_questions list and complexity score."""
-    # Minimal deterministic behaviour for scaffold
+async def planner_node(state: dict[str, Any]) -> dict[str, Any]:
+    """Decompose the original query into typed sub-questions."""
     query = state.get("original_query", "")
-    sub_questions = [{"id": "q1", "question": query}]
-    return {"sub_questions": sub_questions, "complexity_score": 0.2}
+    planner_output = await planner_chain.ainvoke({"query": query})
+    sub_questions = [item.model_dump() for item in planner_output.sub_questions]
+
+    return {
+        "sub_questions": sub_questions,
+        "complexity_score": min(len(sub_questions) / 5, 1.0),
+    }

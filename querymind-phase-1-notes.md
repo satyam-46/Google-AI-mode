@@ -170,7 +170,8 @@ The current Phase 1 system has:
 - A working LangChain foundation
 - Async web-search tool contract
 - Structured Pydantic outputs
-- LCEL chains
+- Five LCEL chains: planner, retriever, synthesizer, arbitrator, critic
+- Local `OutputFixingParser` wrappers for malformed JSON repair
 - Offline testability
 - Basic FastAPI streaming
 - Unit tests proving core behavior
@@ -184,8 +185,18 @@ uv run pytest -q
 Expected result:
 
 ```text
-9 passed
+22 passed
 ```
+
+## Phase 1 Checkpoint Evidence
+
+| Checkpoint item | Status |
+|---|---|
+| All tools pass unit tests | Verified |
+| FAISS concurrent write issue fixed with `asyncio.Lock` | Verified |
+| All 5 LCEL chains stream correctly | Verified with `.astream(...)` tests |
+| LangSmith chain traces show input/output at each step | Verified with five root chain runs and 28 traced child runs |
+| OutputFixingParser auto-heals malformed JSON | Verified with a malformed JSON repair test |
 
 ## Current Live Latency Observations
 

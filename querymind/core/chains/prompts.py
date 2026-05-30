@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from .parsers import CitedAnswerParser, ConfidenceParser, RetrievalEvidenceParser, SubQuestionParser
+from .parsers import (
+    ArbitrationResultParser,
+    CitedAnswerParser,
+    ConfidenceParser,
+    RetrievalEvidenceParser,
+    SubQuestionParser,
+)
 
 
 PLANNER_PROMPT = ChatPromptTemplate.from_messages(
@@ -47,11 +53,12 @@ ARBITRATOR_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You resolve conflicting factual claims by weighing source authority, recency, and corroboration.",
+            "You resolve conflicting factual claims by weighing source authority, recency, and corroboration. "
+            "Return only JSON that matches the schema.\n{format_instructions}",
         ),
         ("human", "Conflict to resolve:\n{conflict}"),
     ]
-)
+).partial(format_instructions=ArbitrationResultParser.get_format_instructions())
 
 CRITIC_PROMPT = ChatPromptTemplate.from_messages(
     [

@@ -1,26 +1,33 @@
-"""Checkpointer factory placeholder for the LangGraph phase."""
+"""Checkpointer factory for LangGraph runs."""
 
 from __future__ import annotations
 
+import os
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 
-def get_checkpointer(env: str = "dev") -> Any:
-    """Return an in-memory checkpointer until the LangGraph phase starts."""
-    try:
+def get_checkpointer(env: str = "dev", db_path: str | Path | None = None) -> Any:
+    """Return a LangGraph checkpointer.
+
+    Dev defaults to SQLite when `langgraph-checkpoint-sqlite` is installed.
+    Tests can pass `env="test"` for an isolated in-memory saver.
+    """
+    if env == "test":
         from langgraph.checkpoint.memory import InMemorySaver
 
         return InMemorySaver()
+
+    path = Path(db_path or os.getenv("QUERYMIND_CHECKPOINT_DB", ".querymind_checkpoints.sqlite3"))
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        conn = sqlite3.connect(path, check_same_thread=False)
+        saver = SqliteSaver(conn)
+        saver.setup()
+        return saver
     except Exception:
-        return _InMemorySaver()
+        from langgraph.checkpoint.memory import InMemorySaver
 
-
-class _InMemorySaver:
-    def __init__(self) -> None:
-        self._data: dict[str, Any] = {}
-
-    def save(self, key: str, value: Any) -> None:
-        self._data[key] = value
-
-    def load(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+        return InMemorySaver()
