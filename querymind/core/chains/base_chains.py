@@ -137,7 +137,7 @@ def _fake_critic_llm(prompt: Any) -> str:
     text = _chat_text(prompt)
     answer = _extract_after("Answer to check:", text)
     sensitive = [flag for flag in ("medical", "legal", "financial") if flag in answer.lower()]
-    unsupported = "No evidence found" in answer
+    unsupported = "No evidence found" in answer or "[LOW CONFIDENCE]" in answer
     score = 0.35 if unsupported else 0.8
     return _json(
         {

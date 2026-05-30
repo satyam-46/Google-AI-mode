@@ -18,7 +18,7 @@ async def planner_node(state: QueryMindState) -> dict[str, Any]:
     start = _now_ms()
     query = state.get("original_query", "")
     planner_output = await planner_chain.ainvoke({"query": query})
-    sub_questions = [item.model_dump() for item in planner_output.sub_questions]
+    sub_questions = _normalize_sub_questions([item.model_dump() for item in planner_output.sub_questions], query)
     complexity = compute_complexity(query, sub_questions)
     capped = sub_questions[:_fanout_cap(complexity)]
 
@@ -30,7 +30,7 @@ async def planner_node(state: QueryMindState) -> dict[str, Any]:
                 name="planner",
                 start_ms=start,
                 end_ms=_now_ms(),
-                details={"sub_questions": len(capped), "raw_sub_questions": len(sub_questions)},
+                details={"run_id": state.get("run_id"), "sub_questions": len(capped), "raw_sub_questions": len(sub_questions)},
             ).model_dump()
         ],
     }
@@ -46,6 +46,39 @@ def compute_complexity(query: str, sub_questions: list[dict[str, Any]]) -> float
     score += 0.14 if words & _CAUSAL_WORDS else 0.0
     score += 0.12 if len(query) > 120 else 0.0
     return min(score, 1.0)
+
+
+def _normalize_sub_questions(sub_questions: list[dict[str, Any]], original_query: str) -> list[dict[str, Any]]:
+    """Drop vague fragments that came from punctuation-only splitting."""
+    normalized: list[dict[str, Any]] = []
+    for sub_question in sub_questions:
+        question = str(sub_question.get("question") or "")
+        search_query = str(sub_question.get("search_query") or question)
+        if normalized and _is_vague_direction_fragment(question, search_query):
+            previous = normalized[-1]
+            previous["question"] = _ensure_question(original_query)
+            previous["search_query"] = original_query.strip(" ?.")
+            previous["reasoning"] = (
+                f"{previous.get('reasoning', '')} Folded a vague direction fragment into the main question."
+            ).strip()
+            continue
+        normalized.append(sub_question)
+    return normalized or [{"id": "q1", "question": _ensure_question(original_query), "search_query": original_query}]
+
+
+def _is_vague_direction_fragment(question: str, search_query: str) -> bool:
+    vague = {"which direction", "what direction", "which way", "what way", "direction"}
+    candidates = {
+        question.lower().strip(" ?."),
+        search_query.lower().strip(" ?."),
+        f"{question} {search_query}".lower().strip(" ?."),
+    }
+    return bool(candidates & vague)
+
+
+def _ensure_question(text: str) -> str:
+    stripped = text.strip()
+    return stripped if stripped.endswith("?") else f"{stripped}?"
 
 
 def _fanout_cap(complexity: float) -> int:

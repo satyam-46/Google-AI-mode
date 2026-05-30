@@ -7,6 +7,7 @@ import re
 import time
 from typing import Any
 
+from core.chains.base_chains import arbitrator_chain
 from graph.state import AgentTrace, QueryMindState
 
 _YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -15,9 +16,9 @@ _NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 
 async def arbitrator_node(state: QueryMindState) -> dict[str, Any]:
     start = _now_ms()
-    results = state.get("retrieval_results", [])
+    results = _current_run_items(state.get("retrieval_results", []), state.get("run_id", ""))
     conflicts = conflict_detector(results)
-    arbitration_results = [arbitrate_conflict(conflict) for conflict in conflicts]
+    arbitration_results = [await arbitrate_conflict(conflict) for conflict in conflicts]
 
     return {
         "conflicts_detected": conflicts,
@@ -27,7 +28,7 @@ async def arbitrator_node(state: QueryMindState) -> dict[str, Any]:
                 name="arbitrator",
                 start_ms=start,
                 end_ms=_now_ms(),
-                details={"conflicts": len(conflicts)},
+                details={"run_id": state.get("run_id"), "conflicts": len(conflicts)},
             ).model_dump()
         ],
     }
@@ -65,19 +66,10 @@ def conflict_detector(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return conflicts
 
 
-def arbitrate_conflict(conflict: dict[str, Any]) -> dict[str, Any]:
-    winner = "claim_a"
-    source_a = str(conflict.get("source_a", ""))
-    source_b = str(conflict.get("source_b", ""))
-    if source_b and not source_a:
-        winner = "claim_b"
-
-    return {
-        "entity": conflict.get("entity", "unknown"),
-        "winning_claim": conflict.get(winner, ""),
-        "winning_source": conflict.get("source_a" if winner == "claim_a" else "source_b", ""),
-        "reasoning": "Selected the claim with available source support; full LLM arbitration is reserved for live mode.",
-    }
+async def arbitrate_conflict(conflict: dict[str, Any]) -> dict[str, Any]:
+    """Resolve a detected conflict through the Phase 1 arbitrator chain."""
+    result = await arbitrator_chain.ainvoke({"conflict": conflict})
+    return result.model_dump()
 
 
 def route_after_arbitrator(state: QueryMindState) -> str:
@@ -85,6 +77,13 @@ def route_after_arbitrator(state: QueryMindState) -> str:
     if state.get("conflicts_detected") and retry_count < 1:
         return "synthesize"
     return "synthesize"
+
+
+def _current_run_items(items: list[dict[str, Any]], run_id: str) -> list[dict[str, Any]]:
+    if not run_id:
+        return items
+    current = [item for item in items if item.get("run_id") == run_id]
+    return current or [item for item in items if not item.get("run_id")]
 
 
 def _first_source(result: dict[str, Any]) -> str:

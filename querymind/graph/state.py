@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 class QueryMindState(TypedDict, total=False):
     original_query: str
     session_id: str
+    run_id: str
     started_at_ms: int
 
     sub_question: dict[str, Any]
@@ -18,7 +19,7 @@ class QueryMindState(TypedDict, total=False):
     complexity_score: float
 
     retrieval_results: Annotated[list[dict[str, Any]], operator.add]
-    retriever_errors: Annotated[list[str], operator.add]
+    retriever_errors: Annotated[list[dict[str, Any]], operator.add]
 
     conflicts_detected: list[dict[str, Any]]
     arbitration_results: list[dict[str, Any]]

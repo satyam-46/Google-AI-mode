@@ -24,13 +24,19 @@ async def cache_lookup_node(state: QueryMindState) -> dict[str, Any]:
         return {
             "cache_hits": [],
             "agent_traces": [
-                AgentTrace(name="cache_lookup", start_ms=start, end_ms=_now_ms(), details={"hit": False}).model_dump()
+                AgentTrace(
+                    name="cache_lookup",
+                    start_ms=start,
+                    end_ms=_now_ms(),
+                    details={"run_id": state.get("run_id"), "hit": False},
+                ).model_dump()
             ],
         }
 
     hit = cached["cache_hit"]
+    retrieval_results = [_with_run_id(item, state.get("run_id", "")) for item in cached.get("retrieval_results", [])]
     return {
-        "retrieval_results": cached.get("retrieval_results", []),
+        "retrieval_results": retrieval_results,
         "final_answer": cached.get("final_answer", {}),
         "cache_hits": [hit["query_hash"]],
         "agent_traces": [
@@ -38,7 +44,7 @@ async def cache_lookup_node(state: QueryMindState) -> dict[str, Any]:
                 name="cache_lookup",
                 start_ms=start,
                 end_ms=_now_ms(),
-                details={"hit": True, "similarity": hit["similarity"]},
+                details={"run_id": state.get("run_id"), "hit": True, "similarity": hit["similarity"]},
             ).model_dump()
         ],
     }
@@ -49,7 +55,7 @@ async def cache_store_node(state: QueryMindState) -> dict[str, Any]:
     session_id = state.get("session_id", "")
     query = state.get("original_query", "")
     result = {
-        "retrieval_results": state.get("retrieval_results", []),
+        "retrieval_results": _current_run_items(state.get("retrieval_results", []), state.get("run_id", "")),
         "final_answer": state.get("final_answer", {}),
     }
     if session_id and query and state.get("final_answer"):
@@ -59,7 +65,12 @@ async def cache_store_node(state: QueryMindState) -> dict[str, Any]:
     return {
         "total_latency_ms": max(0, _now_ms() - int(state.get("started_at_ms", start))),
         "agent_traces": [
-            AgentTrace(name="cache_store", start_ms=start, end_ms=_now_ms(), details={"stored": bool(result)}).model_dump()
+            AgentTrace(
+                name="cache_store",
+                start_ms=start,
+                end_ms=_now_ms(),
+                details={"run_id": state.get("run_id"), "stored": bool(result)},
+            ).model_dump()
         ],
     }
 
@@ -70,3 +81,16 @@ def route_after_cache_lookup(state: QueryMindState) -> str:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _with_run_id(item: dict[str, Any], run_id: str) -> dict[str, Any]:
+    updated = dict(item)
+    updated["run_id"] = run_id
+    return updated
+
+
+def _current_run_items(items: list[dict[str, Any]], run_id: str) -> list[dict[str, Any]]:
+    if not run_id:
+        return items
+    current = [item for item in items if item.get("run_id") == run_id]
+    return current or [item for item in items if not item.get("run_id")]

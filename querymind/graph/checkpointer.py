@@ -11,10 +11,11 @@ from typing import Any
 def get_checkpointer(env: str = "dev", db_path: str | Path | None = None) -> Any:
     """Return a LangGraph checkpointer.
 
-    Dev defaults to SQLite when `langgraph-checkpoint-sqlite` is installed.
-    Tests can pass `env="test"` for an isolated in-memory saver.
+    Async graph execution needs an async checkpointer. The local API uses
+    `InMemorySaver` and persists user-visible state through `SessionStore`.
+    Use `env="sqlite_sync"` only for synchronous graph experiments.
     """
-    if env == "test":
+    if env in {"dev", "test"}:
         from langgraph.checkpoint.memory import InMemorySaver
 
         return InMemorySaver()

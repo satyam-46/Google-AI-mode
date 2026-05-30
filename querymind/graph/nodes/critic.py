@@ -40,7 +40,7 @@ async def critic_node(state: QueryMindState) -> dict[str, Any]:
                 name="critic",
                 start_ms=start,
                 end_ms=_now_ms(),
-                details={"requires_human_review": needs_review, "flags": confidence.flags},
+                details={"run_id": state.get("run_id"), "requires_human_review": needs_review, "flags": confidence.flags},
             ).model_dump()
         ],
     }

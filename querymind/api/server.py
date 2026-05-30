@@ -13,9 +13,11 @@ from pydantic import BaseModel, Field
 from core.memory.session_store import SessionStore
 from graph.query_mind_graph import (
     get_query_graph_state,
+    project_current_run_state,
     graph_config,
     resume_query_graph,
     run_query_graph,
+    stream_query_graph_events,
 )
 
 load_dotenv()
@@ -54,21 +56,12 @@ class ResumeRequest(BaseModel):
 async def _run_graph_and_stream(query: str, session_id: str, token_queue: asyncio.Queue):
     """Run the LangGraph pipeline and push token strings to `token_queue`."""
     try:
-        state = await run_query_graph(query=query, session_id=session_id)
-        await _session_store.save(session_id, state)
-        answer_text = state.get("streaming_answer") or state.get("final_answer", {}).get("answer_text", "")
-        if not answer_text:
-            await token_queue.put(None)
-            return
-
-        tokens = answer_text.split()
-        for tok in tokens:
-            await token_queue.put(tok)
-            await asyncio.sleep(0.02)
+        async for event in stream_query_graph_events(query=query, session_id=session_id):
+            await token_queue.put(event)
     except Exception as exc:
         state = {"original_query": query, "session_id": session_id, "error": str(exc)}
         await _session_store.save(session_id, state)
-        await token_queue.put(json.dumps({"error": str(exc)}))
+        await token_queue.put({"event": "error", "error": str(exc), "session_id": session_id})
     finally:
         await token_queue.put(None)
 
@@ -98,12 +91,11 @@ async def stream_query(payload: QueryRequest):
 
     async def event_generator():
         while True:
-            token = await token_queue.get()
-            if token is None:
+            event = await token_queue.get()
+            if event is None:
                 yield "data: [DONE]\n\n"
                 break
-            # SSE data frame
-            payload = json.dumps({"token": token})
+            payload = json.dumps(event)
             yield f"data: {payload}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -112,7 +104,7 @@ async def stream_query(payload: QueryRequest):
 @app.get("/query/{session_id}/state")
 async def get_query_state(session_id: str):
     checkpoint = get_query_graph_state(session_id)
-    state = checkpoint.values if checkpoint else await _session_store.load(session_id)
+    state = project_current_run_state(dict(checkpoint.values)) if checkpoint else await _session_store.load(session_id)
     if not state:
         return JSONResponse({"error": "not_found"}, status_code=404)
     return {"config": graph_config(session_id), "state": state, "next": getattr(checkpoint, "next", ())}
