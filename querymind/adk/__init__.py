@@ -1,3 +1,3 @@
-"""Google ADK integration stubs."""
+"""Google ADK integration for QueryMind."""
 
-__all__ = ["orchestrator", "grounding", "callbacks"]
+__all__ = ["callbacks", "grounding", "orchestrator", "router", "session_manager", "tools"]

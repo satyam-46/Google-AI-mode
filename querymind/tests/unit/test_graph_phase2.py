@@ -4,7 +4,7 @@ import pytest
 from langgraph.types import Command
 
 from core.chains.parsers import RetrievalEvidence
-from graph.nodes.arbitrator import conflict_detector
+from graph.nodes.arbitrator import conflict_detector, score_conflict_sources
 from graph.nodes.cache import get_session_store
 from graph.nodes.planner import planner_node
 from graph.nodes.retriever import retriever_node
@@ -119,6 +119,22 @@ def test_conflict_detection_triggers_on_contradictory_dates():
     assert conflicts[0]["entity"] == "Python"
 
 
+def test_source_aware_arbitration_scores_authority_recency_and_corroboration():
+    scores = score_conflict_sources(
+        {
+            "claim_a": "Python 2 was released in 2000.",
+            "source_a": "https://www.python.org/download/releases/2.0/",
+            "claim_b": "Python 2 was released in 1991.",
+            "source_b": "https://www.quora.com/python-release-date",
+            "corroborating_sources": ["The Python 2.0 release happened in 2000."],
+        }
+    )
+
+    assert scores["claim_a"]["authority"] > scores["claim_b"]["authority"]
+    assert scores["claim_a"]["corroboration"] > scores["claim_b"]["corroboration"]
+    assert set(scores["claim_a"]) == {"authority", "recency", "corroboration", "total"}
+
+
 @pytest.mark.asyncio
 async def test_arbitrator_node_uses_arbitrator_chain(monkeypatch):
     import graph.nodes.arbitrator as arbitrator_module
@@ -159,7 +175,8 @@ async def test_arbitrator_node_uses_arbitrator_chain(monkeypatch):
         }
     )
 
-    assert result["arbitration_results"][0]["reasoning"] == "Source A is more authoritative."
+    assert result["arbitration_results"][0]["reasoning"].startswith("Source A is more authoritative.")
+    assert "source_scores" in result["arbitration_results"][0]
 
 
 @pytest.mark.asyncio

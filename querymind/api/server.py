@@ -10,6 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from adk.orchestrator import route_query
 from core.memory.session_store import SessionStore
 from graph.query_mind_graph import (
     get_query_graph_state,
@@ -49,6 +50,18 @@ class QueryResponse(BaseModel):
     state: dict[str, Any]
 
 
+class OrchestratedQueryResponse(BaseModel):
+    session_id: str
+    route: str
+    answer: str
+    citations: list[dict[str, Any]]
+    confidence: float
+    requires_human_review: bool = False
+    route_decision: dict[str, Any]
+    state: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None
+
+
 class ResumeRequest(BaseModel):
     feedback: dict[str, Any] = Field(default_factory=dict)
 
@@ -79,6 +92,31 @@ async def query(payload: QueryRequest):
         confidence=final_answer.get("confidence", 0.0),
         requires_human_review=bool(state.get("requires_human_review", False)),
         state=state,
+    )
+
+
+@app.post("/query/orchestrated", response_model=OrchestratedQueryResponse)
+async def orchestrated_query(payload: QueryRequest):
+    session_id = payload.session_id or str(uuid.uuid4())
+    prior_state = await _session_store.load(session_id)
+    result = await route_query(
+        query=payload.query,
+        session_id=session_id,
+        has_session_context=bool(prior_state),
+        session_context=prior_state,
+    )
+    if result.get("state"):
+        await _session_store.save(session_id, result["state"])
+    return OrchestratedQueryResponse(
+        session_id=session_id,
+        route=result.get("route", ""),
+        answer=result.get("answer", ""),
+        citations=result.get("citations", []),
+        confidence=result.get("confidence", 0.0),
+        requires_human_review=bool(result.get("requires_human_review", False)),
+        route_decision=result.get("route_decision", {}),
+        state=result.get("state", {}),
+        error=result.get("error"),
     )
 
 

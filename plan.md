@@ -590,6 +590,13 @@ querymind_tool = FunctionTool(run_querymind)
 
 **What to build:** The ADK root agent that decides between calling QueryMind (deep research) vs Google Search grounding (quick factual lookup).
 
+**Required pre-router:** Add a deterministic, non-LLM routing layer before the ADK root agent:
+- Fast path for short factual questions: definitions, dates, locations, direct "who/what/when/where" lookups, and simple follow-ups resolvable from session context.
+- Deep path for research, comparison, conflict, synthesis, sensitive, legal/medical/financial, "latest/current", recommendation, multi-source, or citation-heavy queries.
+- Ambiguous path may ask one clarifying question or fall back to QueryMind.
+- Every route decision must include `route`, `reason`, `complexity_score`, and matched rule names for observability.
+- Write at least 10 route tests before marking Phase 3 complete.
+
 ```python
 from google.adk.agents import LlmAgent
 from google.adk.tools import google_search
@@ -631,6 +638,11 @@ grounding_config = GenerateContentConfig(
 
 **Key concept:** Google Search grounding in ADK works differently from Tavily — it doesn't return raw results. Instead, the model cites `[1]` style inline references and ADK returns the grounding metadata separately. Learn to parse `grounding_metadata.grounding_chunks`.
 
+**Acceptance criteria:**
+- Simple factual fast-path answers return an answer, citations/grounding metadata, confidence, and route trace.
+- QueryMind deep-path answers can be post-verified by grounding metadata when live ADK credentials are available.
+- Local/offline tests use a deterministic grounding fallback and do not require network access.
+
 ---
 
 ### Step 3.4 — ADK Session & Multi-turn Memory
@@ -650,6 +662,8 @@ session = await session_service.get_session(app_name="querymind", user_id=user_i
 ```
 
 **Integration point:** Connect ADK sessions to LangGraph checkpointer. When a follow-up arrives, load the prior LangGraph state and continue from there rather than re-running from scratch.
+
+**Checkpointing truthfulness requirement:** If the graph uses an in-memory checkpointer in local async mode, call that out in notes and keep durable API/session/cache state in SQLite. Only claim "SQLite-backed graph checkpointing" once LangGraph's async SQLite saver is wired through the app lifecycle.
 
 ---
 
@@ -673,13 +687,31 @@ def after_model_callback(callback_context: CallbackContext, llm_response: LlmRes
     pass
 ```
 
+**What must be logged:** route decision, selected tool/path, model name, start/end latency, error details, grounding metadata count, and final confidence.
+
+---
+
+### Step 3.6 — Source-Aware Arbitration Upgrade
+
+**File:** `graph/nodes/arbitrator.py`
+
+**What to build:** Upgrade conflict arbitration so resume claims are accurate:
+- Score source authority from domain quality and first-party/official signals.
+- Score publication recency when dates are available.
+- Score corroboration count across independent retrieval results.
+- Include these component scores in `arbitration_results` and dashboard traces.
+
 ---
 
 ### ✅ Phase 3 Checkpoint
-- [ ] ADK root agent correctly routes simple vs complex queries (write 10 test cases)
-- [ ] Google Search grounding adds citations to final answer
-- [ ] Multi-turn conversation: "Tell me about LangGraph" → "Who built it?" resolves correctly
-- [ ] ADK callbacks feed observability dashboard with real data
+- [x] ADK root agent correctly routes simple vs complex queries (write 10 test cases)
+- [x] Deterministic pre-router sends simple factual queries to fast path without running LangGraph
+- [x] Complex/sensitive/comparative/current queries route to the full QueryMind graph
+- [x] Google Search grounding adds citations to final answer
+- [x] Multi-turn conversation: "Tell me about LangGraph" → "Who built it?" resolves correctly
+- [x] ADK callbacks feed observability dashboard with real data
+- [x] Route/grounding/tool errors surface as structured errors, not generic messages
+- [x] Arbitration scores authority, recency, and corroboration when conflicts exist
 - [ ] End-to-end latency for a complex query: < 12 seconds (benchmark this)
 
 ---

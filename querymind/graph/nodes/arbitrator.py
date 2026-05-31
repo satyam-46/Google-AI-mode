@@ -6,6 +6,7 @@ import itertools
 import re
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from core.chains.base_chains import arbitrator_chain
 from graph.state import AgentTrace, QueryMindState
@@ -69,7 +70,31 @@ def conflict_detector(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def arbitrate_conflict(conflict: dict[str, Any]) -> dict[str, Any]:
     """Resolve a detected conflict through the Phase 1 arbitrator chain."""
     result = await arbitrator_chain.ainvoke({"conflict": conflict})
-    return result.model_dump()
+    arbitration = result.model_dump()
+    scores = score_conflict_sources(conflict)
+    arbitration["source_scores"] = scores
+    arbitration["reasoning"] = (
+        f"{arbitration.get('reasoning', '')} "
+        f"Source scoring considered authority, recency, and corroboration: {scores}."
+    ).strip()
+    if scores["claim_a"]["total"] != scores["claim_b"]["total"]:
+        winner_key = "claim_a" if scores["claim_a"]["total"] > scores["claim_b"]["total"] else "claim_b"
+        arbitration["scored_winner"] = conflict.get(winner_key, "")
+        arbitration["scored_winner_source"] = conflict.get(f"source_{winner_key[-1]}", "")
+    return arbitration
+
+
+def score_conflict_sources(conflict: dict[str, Any]) -> dict[str, Any]:
+    """Score conflict sides using authority, recency, and corroboration signals."""
+    claim_a = str(conflict.get("claim_a", ""))
+    claim_b = str(conflict.get("claim_b", ""))
+    source_a = str(conflict.get("source_a", ""))
+    source_b = str(conflict.get("source_b", ""))
+    corroborating_sources = conflict.get("corroborating_sources") or []
+    return {
+        "claim_a": _score_claim(claim_a, source_a, corroborating_sources),
+        "claim_b": _score_claim(claim_b, source_b, corroborating_sources),
+    }
 
 
 def route_after_arbitrator(state: QueryMindState) -> str:
@@ -91,6 +116,67 @@ def _first_source(result: dict[str, Any]) -> str:
     if not citations:
         return ""
     return str(citations[0].get("url") or citations[0].get("source") or "")
+
+
+def _score_claim(claim: str, source: str, corroborating_sources: list[Any]) -> dict[str, float]:
+    authority = _authority_score(source)
+    recency = _recency_score(claim)
+    corroboration = _corroboration_score(claim, corroborating_sources)
+    total = round((authority * 0.45) + (recency * 0.2) + (corroboration * 0.35), 3)
+    return {
+        "authority": authority,
+        "recency": recency,
+        "corroboration": corroboration,
+        "total": total,
+    }
+
+
+def _authority_score(source: str) -> float:
+    host = urlparse(source).netloc.lower() if source.startswith("http") else source.lower()
+    if not host:
+        return 0.2
+    official_signals = (".gov", ".edu", "python.org", "docs.", "cloud.google.com", "ai.google.dev")
+    strong_publishers = ("wikipedia.org", "reuters.com", "apnews.com", "bbc.", "nature.com")
+    if any(signal in host for signal in official_signals):
+        return 1.0
+    if any(signal in host for signal in strong_publishers):
+        return 0.78
+    if any(signal in host for signal in ("reddit.com", "quora.com", "facebook.com")):
+        return 0.35
+    return 0.55
+
+
+def _recency_score(claim: str) -> float:
+    years = [int(year) for year in _YEAR_RE.findall(claim)]
+    if not years:
+        return 0.5
+    newest = max(years)
+    current_year = time.gmtime().tm_year
+    age = max(0, current_year - newest)
+    if age <= 1:
+        return 1.0
+    if age <= 5:
+        return 0.8
+    if age <= 15:
+        return 0.6
+    return 0.45
+
+
+def _corroboration_score(claim: str, corroborating_sources: list[Any]) -> float:
+    if not corroborating_sources:
+        return 0.5
+    claim_numbers = {number for number in _NUMBER_RE.findall(claim) if len(number) > 1}
+    claim_years = set(_YEAR_RE.findall(claim))
+    matches = 0
+    for source in corroborating_sources:
+        text = str(source)
+        source_numbers = set(_NUMBER_RE.findall(text))
+        source_years = set(_YEAR_RE.findall(text))
+        if claim_years and claim_years <= source_years:
+            matches += 1
+        elif claim_numbers and claim_numbers <= source_numbers:
+            matches += 1
+    return min(1.0, 0.4 + (matches * 0.2))
 
 
 def _boolean_conflict(left: str, right: str) -> bool:
