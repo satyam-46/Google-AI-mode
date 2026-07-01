@@ -14,6 +14,7 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
+from core.hardening import estimate_tokens, get_cost_controller
 from core.chains.parsers import (
     ArbitrationResult,
     FixedArbitrationResultParser,
@@ -191,8 +192,17 @@ def _model(model_name: str, fake_llm: Any) -> Runnable[Any, str]:
         return fake
 
     primary = ChatGoogleGenerativeAI(model=model_name, temperature=0)
-    fallback = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-    return primary.with_fallbacks([fallback, fake])
+    flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    primary_with_fallbacks = primary.with_fallbacks([flash, fake])
+    flash_with_fallback = flash.with_fallbacks([fake])
+
+    async def invoke_with_cost_guard(prompt: Any) -> str:
+        prompt_text = _chat_text(prompt)
+        selected_model = get_cost_controller().choose_model(model_name, estimate_tokens(prompt_text))
+        model = flash_with_fallback if selected_model == "gemini-2.5-flash" else primary_with_fallbacks
+        return await model.ainvoke(prompt)
+
+    return RunnableLambda(invoke_with_cost_guard)
 
 
 async def _prepare_retriever_input(inputs: dict[str, Any]) -> dict[str, Any]:

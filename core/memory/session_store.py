@@ -56,6 +56,27 @@ class SessionStore:
             ).fetchone()
             return json.loads(row["state_json"]) if row else {}
 
+    async def list_sessions(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Return recent saved sessions with their projected state payloads."""
+        async with self._lock:
+            rows = self._conn.execute(
+                """
+                select session_id, state_json, updated_at
+                from sessions
+                order by updated_at desc
+                limit ?
+                """,
+                (max(1, limit),),
+            ).fetchall()
+            return [
+                {
+                    "session_id": row["session_id"],
+                    "state": json.loads(row["state_json"]),
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ]
+
     async def store_result(self, session_id: str, query: str, result: dict[str, Any]) -> None:
         query_embedding = await self._embed_query(query)
         async with self._lock:

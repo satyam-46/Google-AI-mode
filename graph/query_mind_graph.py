@@ -18,6 +18,8 @@ from graph.nodes.retriever import retriever_node, route_to_retrievers
 from graph.nodes.session import initialize_node
 from graph.nodes.synthesizer import synthesizer_node
 from graph.state import QueryMindState
+from core.hardening import get_dead_letter_store
+from observability.tracer import get_trace_store
 
 
 def build_graph(env: str = "dev", checkpointer: Any | None = None):
@@ -61,11 +63,23 @@ def graph_config(session_id: str) -> dict[str, Any]:
 async def run_query_graph(query: str, session_id: str | None = None, graph: Any | None = None) -> dict[str, Any]:
     session_id = session_id or str(uuid.uuid4())
     app = graph or get_graph()
-    state = await app.ainvoke(
-        {"original_query": query, "session_id": session_id},
-        config=graph_config(session_id),
-    )
-    return project_current_run_state(dict(state))
+    try:
+        state = await app.ainvoke(
+            {"original_query": query, "session_id": session_id},
+            config=graph_config(session_id),
+        )
+    except Exception as exc:
+        await get_dead_letter_store().record_failure(
+            session_id=session_id,
+            query=query,
+            stage="graph_run",
+            error=exc,
+            state={"original_query": query, "session_id": session_id},
+        )
+        raise
+    projected = project_current_run_state(dict(state))
+    await get_trace_store().record_graph_state(projected)
+    return projected
 
 
 async def stream_query_graph_events(
@@ -128,9 +142,21 @@ async def resume_query_graph(
     app = graph or get_graph()
     config = graph_config(session_id)
     resume_payload = feedback or {"approved": True}
-    app.update_state(config, {"human_feedback": resume_payload})
-    state = await app.ainvoke(Command(resume=resume_payload), config=config)
-    return project_current_run_state(dict(state))
+    try:
+        app.update_state(config, {"human_feedback": resume_payload})
+        state = await app.ainvoke(Command(resume=resume_payload), config=config)
+    except Exception as exc:
+        await get_dead_letter_store().record_failure(
+            session_id=session_id,
+            query="",
+            stage="graph_resume",
+            error=exc,
+            state={"session_id": session_id, "human_feedback": resume_payload},
+        )
+        raise
+    projected = project_current_run_state(dict(state))
+    await get_trace_store().record_graph_state(projected)
+    return projected
 
 
 def get_query_graph_state(session_id: str, graph: Any | None = None) -> Any:
